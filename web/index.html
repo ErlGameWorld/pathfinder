@@ -1,0 +1,1442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hex Pathfinder Visualization</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #f0f0f0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        /* Modal Styles */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 100; 
+            left: 0;
+            top: 0;
+            width: 100%; 
+            height: 100%; 
+            overflow: auto; 
+            background-color: rgba(0,0,0,0.6); 
+        }
+        .modal-content {
+            background-color: #252526;
+            margin: 15% auto; 
+            padding: 20px;
+            border: 1px solid #454545;
+            width: 50%;
+            color: #f0f0f0;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+            border-radius: 5px;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover,
+        .close:focus {
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            border: 1px solid #454545;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #333;
+        }
+        
+        header {
+            width: 100%;
+            padding: 5px 10px;
+            background-color: #252526;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+        h1 { margin: 0; font-size: 0.8rem; white-space: nowrap; margin-right: 5px; }
+        .controls {
+            display: flex;
+            gap: 2px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        button {
+            background-color: #3a3d41;
+            color: #ccc;
+            border: 1px solid #454545;
+            padding: 1px 4px;
+            font-size: 11px;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        button:hover { background-color: #505050; }
+        button.active {
+            background-color: #0e639c;
+            color: white;
+            border-color: #1177bb;
+        }
+        #canvas-container {
+            flex-grow: 1;
+            position: relative;
+            width: 100%;
+            overflow: hidden;
+            background-color: #1e1e1e;
+            cursor: crosshair;
+        }
+        canvas {
+            display: block;
+        }
+        .legend {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(30, 30, 30, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #454545;
+            pointer-events: none;
+            font-size: 0.9rem;
+        }
+        .legend-item { display: flex; align-items: center; margin-bottom: 5px; }
+        .box { width: 15px; height: 15px; margin-right: 8px; border: 1px solid #555; }
+        .stats {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(30, 30, 30, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>寻路算法可视化 (Hex Grid)</h1>
+    <div class="controls">
+        <button id="btn-wall" onclick="setMode('wall')" title="绘制墙壁">✏️ 绘制</button>
+        <button id="btn-erase" onclick="setMode('erase')" title="擦除">🧽 擦除</button>
+        <button id="btn-pan" class="active" onclick="setMode('pan')" title="拖动地图">✋ 拖动</button>
+        <button id="btn-start" onclick="setMode('start')" title="设置起点">🟢 起点</button>
+        <button id="btn-end" onclick="setMode('end')" title="设置终点">🔴 终点</button>
+        <div style="width: 1px; height: 16px; background: #555; margin: 0 2px;"></div>
+        
+        <button onclick="saveMap()" title="保存地图">💾 保存地图</button>
+        <button onclick="document.getElementById('file-input').click()" title="加载地图">📂 加载地图</button>
+        <input type="file" id="file-input" style="display: none;" onchange="loadMap(this)">
+        
+        <div style="width: 1px; height: 16px; background: #555; margin: 0 2px;"></div>
+        
+        <select id="map-size" style="background: #333; color: white; border: 1px solid #555; padding: 2px; font-size: 12px;">
+            <option value="100">100 x 100</option>
+            <option value="250" selected>250 x 250</option>
+            <option value="300">300 x 300</option>
+            <option value="500">500 x 500</option>
+            <option value="1000">1000 x 1000</option>
+            <option value="2000">2000 x 2000</option>
+            <option value="2500">2500 x 2500</option>
+        </select>
+        <button onclick="generateMap()" style="background-color: #d16969; color: white;">🎲 生成地图</button>
+        <div style="width: 1px; height: 16px; background: #555; margin: 0 2px;"></div>
+        
+        <button onclick="toggleCoords()" id="btn-coords"># 坐标</button>
+        
+        <div style="display: flex; gap: 2px; align-items: center; background: #333; padding: 1px 3px; border-radius: 3px;">
+            <input type="number" id="jump-q" placeholder="Q" style="width: 45px; background: #222; border: 1px solid #555; color: #fff; padding: 1px; font-size: 11px;">
+            <input type="number" id="jump-r" placeholder="R" style="width: 45px; background: #222; border: 1px solid #555; color: #fff; padding: 1px; font-size: 11px;">
+            <button onclick="jumpToInput()" style="padding: 1px 4px;">Go</button>
+        </div>
+
+        <div style="width: 1px; height: 16px; background: #555; margin: 0 2px;"></div>
+        
+        <button onclick="zoomMap(1.2)" title="放大">➕</button>
+        <button onclick="zoomMap(0.8)" title="缩小">➖</button>
+        
+        <div style="width: 1px; height: 16px; background: #555; margin: 0 2px;"></div>
+        <span style="font-size: 0.75rem; color: #888;">Tip: 滚轮缩放</span>
+        <button onclick="clearWalls()">🧹 清除阻挡</button>
+        <button onclick="resetPath()">🔄 重置路径</button>
+        <div class="playback-controls" style="display:flex; gap:2px;">
+            <button onclick="changeSpeed(-1)" title="减速">⏪</button>
+            <button onclick="togglePause()" id="btn-pause" title="暂停/继续">⏸</button>
+            <button onclick="changeSpeed(1)" title="加速">⏩</button>
+        </div>
+
+        <div style="width: 1px; height: 16px; background: #555; margin: 0 2px;"></div>
+
+        <select id="algo-select" style="background: #333; color: white; border: 1px solid #555; padding: 2px; font-size: 12px;">
+            <option value="AStar" selected>AStar</option>
+            <option value="JPS">JPS</option>
+            <option value="HJPS">HJPS</option>
+            <option value="BFS">BFS</option>
+            <option value="BiAStar">BiAStar</option>
+            <option value="DHPAStar">DHPAtar</option>
+            <option value="DHPAJps">DHPAJPS</option>
+            <option value="FlowField">FlowField</option>
+            <option value="DStarLite">DStarLite</option>
+
+        </select>
+
+        <button onclick="startPathfinding()" style="background-color: #107c10; color: white; font-weight: bold;">▶ 开始寻路</button>
+        <div style="width: 1px; height: 16px; background: #555; margin: 0 2px;"></div>
+        <button onclick="runBenchmarkUI()" title="对比所有算法性能">📊 性能对比</button>
+    </div>
+</header>
+
+<div id="benchmark-modal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeBenchmarkModal()">&times;</span>
+        <h2>算法性能对比</h2>
+        <div id="benchmark-config">
+            <p>请选择要测试的算法：</p>
+            <div id="algo-checkboxes" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px;">
+                <!-- Populated by JS -->
+            </div>
+            <div style="text-align: right;">
+                <button onclick="selectAllAlgos(true)">全选</button>
+                <button onclick="selectAllAlgos(false)">全不选</button>
+                <button onclick="runSelectedBenchmark()" style="background-color: #107c10; color: white; margin-left: 20px;">▶ 开始测试</button>
+            </div>
+        </div>
+        <div id="benchmark-results" style="margin-top: 20px;"></div>
+    </div>
+</div>
+
+<div id="canvas-container">
+    <canvas id="gridCanvas"></canvas>
+    <div class="legend">
+        <div class="legend-item"><div class="box" style="background:#2d2d30"></div> 空地</div>
+        <div class="legend-item"><div class="box" style="background:#808080"></div> 墙壁</div>
+        <div class="legend-item"><div class="box" style="background:#5c5c5c"></div> 山脉</div>
+        <div class="legend-item"><div class="box" style="background:#00BFFF"></div> 河流</div>
+        <div class="legend-item"><div class="box" style="background:#228b22"></div> 森林</div>
+        <div class="legend-item"><div class="box" style="background:#cd5c5c"></div> 城池</div>
+        <div class="legend-item"><div class="box" style="background:#800080"></div> 关卡</div>
+        <div class="legend-item"><div class="box" style="background:#264f78"></div> 已访问</div>
+    </div>
+    <div class="stats" id="stats">
+        Ready
+    </div>
+    <div class="stats" id="point-stats" style="top: 60px; display: none;">
+        Start: -<br>End: -
+    </div>
+    <div id="hex-info" style="position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; pointer-events: none; display: none;">
+        Info
+    </div>
+</div>
+
+<script>
+    /**
+     * 1. Hex 基础逻辑
+     * 使用 Axial Coordinates (q, r)
+     */
+    class Hex {
+        constructor(q, r) {
+            this.q = q;
+            this.r = r;
+        }
+
+        equals(other) {
+            return this.q === other.q && this.r === other.r;
+        }
+
+        add(other) {
+            return new Hex(this.q + other.q, this.r + other.r);
+        }
+
+        // 邻居方向
+        static directions = [
+            new Hex(1, 0), new Hex(1, -1), new Hex(0, -1),
+            new Hex(-1, 0), new Hex(-1, 1), new Hex(0, 1)
+        ];
+
+        static neighbor(hex, direction) {
+            return hex.add(Hex.directions[direction]);
+        }
+
+        // 距离公式
+        distance(b) {
+            return (Math.abs(this.q - b.q) + Math.abs(this.q + this.r - b.q - b.r) + Math.abs(this.r - b.r)) / 2;
+        }
+
+        toString() {
+            return `${this.q},${this.r}`;
+        }
+    }
+
+    /**
+     * 2. 渲染与布局
+     * Pointy Top Hexagons
+     */
+    let HEX_SIZE = 15;
+    const SQRT3 = Math.sqrt(3);
+
+    function hexToPixel(hex) {
+        // 使用 Offset Coordinates (Odd-R) 渲染策略，使地图看起来直立
+        // q = col, r = row
+
+        // 水平间距：w = sqrt(3) * size
+        // 垂直间距：h = 3/2 * size
+
+        const w = HEX_SIZE * SQRT3;
+        const h = HEX_SIZE * 1.5;
+
+        // Offset Logic: 奇数行向右偏移半个宽度
+        const xOffset = (hex.r % 2) * (w / 2);
+
+        const x = hex.q * w + xOffset;
+
+        // Y 轴翻转：让 0 在最下面 (Visual Bottom-Left is 0,0)
+        // 假设 offsetY 已经处理了视口平移，这里我们只计算相对于 (0,0) 的逻辑坐标
+        // 为了让 r=0 在下面，r 越大 y 越小 (屏幕坐标系)
+        // 或者我们直接计算正向 y，然后由 draw 里的 offsetY 处理翻转?
+        // 不，最简单的做法是：y = -row * h
+        const y = -hex.r * h;
+
+        return { x, y };
+    }
+
+    function pixelToHex(x, y) {
+        // Inverse Offset Coordinates (Approximate for picking)
+        const w = HEX_SIZE * SQRT3;
+        const h = HEX_SIZE * 1.5;
+
+        // 1.其中 y = -row * h => row = -y / h
+        const r = Math.round(-y / h);
+
+        // 2. x = col * w + (row%2 * w/2)
+        // => col * w = x - offset
+        // => col = (x - offset) / w
+        const xOffset = (Math.abs(r) % 2) * (w / 2);
+        const q = Math.round((x - xOffset) / w);
+
+        return new Hex(q, r);
+    }
+
+    function hexRound(fracQ, fracR) {
+        let q = Math.round(fracQ);
+        let r = Math.round(fracR);
+        let s = Math.round(-fracQ - fracR);
+        const q_diff = Math.abs(q - fracQ);
+        const r_diff = Math.abs(r - fracR);
+        const s_diff = Math.abs(s - (-fracQ - fracR));
+        if (q_diff > r_diff && q_diff > s_diff) {
+            q = -r - s;
+        } else if (r_diff > s_diff) {
+            r = -q - s;
+        }
+        return new Hex(q, r);
+    }
+
+    /**
+     * 3. 应用程序状态
+     */
+    const canvas = document.getElementById('gridCanvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('canvas-container');
+
+    // Map State
+        const walls = new Map();
+        // Default to a reasonable view, but logic supports full map
+        let startHex = new Hex(1, 1);
+        let endHex = new Hex(10, 1);
+        let visited = new Map(); // hexString -> { parent: Hex, g: number }
+        let path = [];
+        let currentMode = 'pan'; // wall, start, end, pan
+        let isMouseDown = false;
+        let animationId = null;
+        let isPanning = false;
+        let lastMouseX = 0, lastMouseY = 0;
+
+        // Viewport
+        let offsetX = 50;
+        // Y 轴翻转后：
+        // y_screen = hex_y + offsetY
+        // hex_y(0) = 0
+        // => y_screen(0) = offsetY
+        // 我们希望 (0,0) 出现在屏幕左下角 (padding 50)
+        // y_screen_bottom = canvas.height - 50
+        // 所以 offsetY 应该设为 canvas.height - 50
+        let offsetY = 50; // Initial value, will be reset in resize()
+        let showCoords = false; // Toggle state for coordinates
+
+        // Map Config
+        let MAP_WIDTH = 250;
+        let MAP_HEIGHT = 250;
+
+    function resize() {
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+
+        // Reset to Bottom-Left 0,0 on initial load only?
+        // Or just ensure valid start.
+        if (offsetY === 50) {
+            offsetY = canvas.height - 50;
+        }
+
+        draw();
+    }
+    window.addEventListener('resize', resize);
+
+    /**
+     * 4. 绘图逻辑
+     */
+    // Optimized Data Structures for Rendering
+    let wallsCache = [];   // Array of {q, r, color}
+    let visitedCache = []; // Array of {q, r}
+
+    function updateWallCache() {
+        wallsCache = [];
+        for (const [key, type] of walls) {
+            const parts = key.split(',');
+            const q = parseInt(parts[0]);
+            const r = parseInt(parts[1]);
+            
+            let color = '#808080';
+            if (type === 1) color = '#5c5c5c';
+            else if (type === 2) color = '#00BFFF';
+            else if (type === 3) color = '#cd5c5c';
+            else if (type === 4) color = '#800080';
+            else if (type === 5) color = '#228b22';
+            
+            wallsCache.push({q, r, color});
+        }
+    }
+
+    function updateVisitedCache() {
+        visitedCache = [];
+        for (const key of visited.keys()) {
+             const parts = key.split(',');
+             const q = parseInt(parts[0]);
+             const r = parseInt(parts[1]);
+             visitedCache.push({q, r});
+        }
+    }
+
+    function drawHex(q, r, fillStyle, strokeStyle = '#333') {
+        // Reuse temp hex for calculations if needed, but hexToPixel only needs q,r
+        // hexToPixel expects an object with q,r properties.
+        // We can pass {q,r} literal to avoid Hex class overhead, 
+        // OR refactor hexToPixel to take q,r.
+        // For minimal change, let's pass literal.
+        const center = hexToPixel({q, r});
+        const cx = center.x + offsetX;
+        const cy = center.y + offsetY;
+
+        // Check bounds roughly
+        if (cx < -HEX_SIZE || cx > canvas.width + HEX_SIZE || cy < -HEX_SIZE || cy > canvas.height + HEX_SIZE) return;
+
+        // Level of Detail: Simplification for small hexes
+        if (HEX_SIZE < 6) {
+             if (fillStyle) {
+                ctx.fillStyle = fillStyle;
+                // Draw square approximate
+                const size = HEX_SIZE * 1.5; // Roughly match area
+                ctx.fillRect(cx - size/2, cy - size/2, size, size);
+             }
+             return; // Skip stroke and text
+        }
+
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+            const angle_deg = 60 * i - 30;
+            const angle_rad = Math.PI / 180 * angle_deg;
+            const px = cx + HEX_SIZE * Math.cos(angle_rad);
+            const py = cy + HEX_SIZE * Math.sin(angle_rad);
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+
+        if (fillStyle) {
+            ctx.fillStyle = fillStyle;
+            ctx.fill();
+        }
+
+        // Always stroke border
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = strokeStyle || '#444'; // Lighter border for visibility
+        ctx.stroke();
+
+        // Draw Coords
+        if (showCoords && HEX_SIZE > 10) {
+            ctx.fillStyle = '#aaa';
+            ctx.font = '10px sans-serif';
+            // Ensure coords are drawn ON TOP of borders/fills
+            ctx.fillText(`${q},${r}`, cx, cy);
+        }
+    }
+
+    function drawMarker(hex, color, label) {
+        if (!hex) return;
+        const center = hexToPixel(hex);
+        const cx = center.x + offsetX;
+        const cy = center.y + offsetY;
+        
+        // Ensure visible even if zoomed out
+        // Use a fixed minimum size (e.g., 5px radius) so it's always visible
+        const radius = Math.max(HEX_SIZE * 0.7, 5);
+        
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        
+        // Label
+        if (label && radius > 8) {
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, cx, cy);
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Background color (Represents Empty Terrain now)
+        ctx.fillStyle = '#2d2d30'; // Match legend "Empty" color
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Performance Optimization:
+        // When zoomed out (HEX_SIZE < 6), iterate sparse data instead of full grid
+        const useSparseRendering = HEX_SIZE < 6;
+
+        if (useSparseRendering) {
+            // Draw Map Boundary (Rectangle)
+            // ... (Boundary drawing code omitted for brevity as it remains same logic but using constants) ...
+             const c1 = hexToPixel({q:0, r:0});
+             const c2 = hexToPixel({q:MAP_WIDTH, r:0});
+             const c3 = hexToPixel({q:0, r:MAP_HEIGHT});
+             const c4 = hexToPixel({q:MAP_WIDTH, r:MAP_HEIGHT});
+             
+             const minX = Math.min(c1.x, c2.x, c3.x, c4.x) + offsetX - HEX_SIZE;
+             const maxX = Math.max(c1.x, c2.x, c3.x, c4.x) + offsetX + HEX_SIZE;
+             const minY = Math.min(c1.y, c2.y, c3.y, c4.y) + offsetY - HEX_SIZE;
+             const maxY = Math.max(c1.y, c2.y, c3.y, c4.y) + offsetY + HEX_SIZE;
+             
+             ctx.strokeStyle = '#444';
+             ctx.lineWidth = 2;
+             ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+
+            // Defensive Sync: Ensure cache is populated if walls exist
+            // This prevents "invisible map" issues when switching modes after generation/loading
+            if (wallsCache.length === 0 && walls.size > 0) {
+                updateWallCache();
+            }
+
+            // 1. Draw Walls (from Cache)
+            for (let i = 0; i < wallsCache.length; i++) {
+                const w = wallsCache[i];
+                drawHex(w.q, w.r, w.color);
+            }
+
+            // 2. Draw Visited (from Cache)
+            for (let i = 0; i < visitedCache.length; i++) {
+                const v = visitedCache[i];
+                drawHex(v.q, v.r, '#264f78');
+            }
+
+            // 3. Draw Path
+            for (const h of path) {
+                drawHex(h.q, h.r, '#ffff00');
+            }
+            
+            // 4. Start/End (Draw regular hexes if possible, markers will overlay)
+            // if (startHex) drawHex(startHex.q, startHex.r, '#4ec9b0'); 
+            // if (endHex) drawHex(endHex.q, endHex.r, '#f44747');     
+
+        } else {
+            // Standard Grid Rendering (for zoomed in view)
+            
+            // ... (Viewport calculation) ...
+    
+            const centerHex = pixelToHex(canvas.width/2 - offsetX, canvas.height/2 - offsetY);
+    
+            // ... (Radius calc) ...
+            const qRadius = Math.ceil(canvas.width / (HEX_SIZE * SQRT3)) + 2;
+            const rRadius = Math.ceil(canvas.height / (HEX_SIZE * 1.5)) + 2;
+    
+            let startR = Math.max(0, centerHex.r - rRadius);
+            let endR = Math.min(MAP_HEIGHT, centerHex.r + rRadius);
+            
+            if (MAP_HEIGHT < rRadius * 2) {
+                startR = 0;
+                endR = MAP_HEIGHT;
+            }
+    
+            // Iterate rows
+            for (let r = startR; r < endR; r++) {
+                // Iterate cols
+                let startQ = Math.max(0, centerHex.q - qRadius);
+                let endQ = Math.min(MAP_WIDTH, centerHex.q + qRadius);
+                
+                if (MAP_WIDTH < qRadius * 2) {
+                    startQ = 0;
+                    endQ = MAP_WIDTH;
+                }
+    
+                for (let q = startQ; q < endQ; q++) {
+                    // Avoid new Hex(q,r) if possible, but map uses string keys
+                    // const h = new Hex(q, r); 
+                    // const key = h.toString(); 
+                    // Optimization: manual string build
+                    const key = `${q},${r}`;
+    
+                    let color = null; // Default empty
+    
+                    if (walls.has(key)) {
+                        const type = walls.get(key);
+                        if (type === 1) color = '#5c5c5c'; 
+                        else if (type === 2) color = '#00BFFF'; 
+                        else if (type === 3) color = '#cd5c5c'; 
+                        else if (type === 4) color = '#800080'; 
+                        else if (type === 5) color = '#228b22'; 
+                        else color = '#808080'; 
+                    } else if (startHex && q === startHex.q && r === startHex.r) {
+                        color = '#4ec9b0'; 
+                    } else if (endHex && q === endHex.q && r === endHex.r) {
+                        color = '#f44747'; 
+                    } else if (path.some(p => p.q === q && p.r === r)) {
+                        color = '#ffff00'; 
+                    } else if (visited.has(key)) {
+                        color = '#264f78'; 
+                    }
+    
+                    drawHex(q, r, color);
+    
+                    // Start/End highlights handled by markers below
+                }
+            }
+        }
+
+        // Always draw Start/End Markers on top
+        if (startHex) drawMarker(startHex, '#00ff00', 'S');
+        if (endHex) drawMarker(endHex, '#ff0000', 'E');
+    }
+
+    /**
+     * 5. 交互逻辑
+     */
+    function getHexFromEvent(e) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left - offsetX;
+        const y = e.clientY - rect.top - offsetY;
+        return pixelToHex(x, y);
+    }
+
+    async function sendObstacleUpdate(hex, state) {
+        try {
+            await fetch('/api/obstacle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ q: hex.q, r: hex.r, state: state })
+            });
+        } catch (e) {
+            console.error('Failed to update obstacle', e);
+        }
+    }
+
+    function updatePointStats() {
+        const div = document.getElementById('point-stats');
+        if (startHex || endHex) {
+            div.style.display = 'block';
+            const s = startHex ? `(${startHex.q}, ${startHex.r})` : 'Not Set';
+            const e = endHex ? `(${endHex.q}, ${endHex.r})` : 'Not Set';
+            div.innerHTML = `<strong>Start:</strong> ${s}<br><strong>End:</strong> ${e}`;
+        } else {
+            div.style.display = 'none';
+        }
+    }
+
+    function handleInput(e) {
+        const hex = getHexFromEvent(e);
+        const key = hex.toString();
+
+        if (currentMode === 'wall') {
+            if (e.buttons === 1) { // Left click
+                if (!hex.equals(startHex) && !hex.equals(endHex)) {
+                    if (!walls.has(key)) {
+                        walls.set(key, 100); // 100 = User Wall
+                        sendObstacleUpdate(hex, true);
+                        // Update cache incrementally
+                        wallsCache.push({q: hex.q, r: hex.r, color: '#808080'});
+                    }
+                }
+            } 
+            // Removed right-click erase to avoid conflict with "Right Click to Pan"
+        } else if (currentMode === 'erase') {
+            if (e.buttons === 1) { // Left click
+                 if (walls.has(key)) {
+                    walls.delete(key);
+                    sendObstacleUpdate(hex, false);
+                    updateWallCache();
+                }
+            }
+        } else if (currentMode === 'start') {
+            if (!walls.has(key)) {
+                startHex = hex;
+                updatePointStats();
+            }
+        } else if (currentMode === 'end') {
+            if (!walls.has(key)) {
+                endHex = hex;
+                updatePointStats();
+            }
+        }
+
+        // Reset path if map changes
+        if (path.length > 0) {
+            // Optional: Realtime update?
+        }
+        draw();
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+        // Right Click (2) -> Switch to Pan
+        if (e.buttons === 2) {
+            setMode('pan');
+            return;
+        }
+
+        if (currentMode === 'pan' || e.buttons === 4 || (e.buttons === 1 && e.shiftKey)) { // Pan mode or Middle mouse or Shift+Left
+            isPanning = true;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+            canvas.style.cursor = 'grabbing';
+        } else {
+            isMouseDown = true;
+            handleInput(e);
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        // Update Info Panel
+        const hex = getHexFromEvent(e);
+        const infoPanel = document.getElementById('hex-info');
+        
+        if (hex.q >= 0 && hex.q < MAP_WIDTH && hex.r >= 0 && hex.r < MAP_HEIGHT) {
+            infoPanel.style.display = 'block';
+            const key = `${hex.q},${hex.r}`;
+            let typeStr = 'Empty';
+            
+            if (walls.has(key)) {
+                const type = walls.get(key);
+                if (type === 1) typeStr = 'Mountain';
+                else if (type === 2) typeStr = 'River';
+                else if (type === 3) typeStr = 'City';
+                else if (type === 4) typeStr = 'Pass';
+                else if (type === 5) typeStr = 'Forest';
+                else typeStr = 'Wall';
+            }
+            
+            let status = [];
+            if (startHex && hex.equals(startHex)) status.push("Start");
+            if (endHex && hex.equals(endHex)) status.push("End");
+            if (path.some(p => p.q === hex.q && p.r === hex.r)) status.push("Path"); // path is now array of objects
+            else if (visited.has(key)) status.push("Visited");
+            
+            infoPanel.innerText = `Hex: (${hex.q}, ${hex.r})\nType: ${typeStr}${status.length ? '\nStatus: ' + status.join(', ') : ''}`;
+        } else {
+            infoPanel.style.display = 'none';
+        }
+
+        if (isPanning) {
+            const dx = e.clientX - lastMouseX;
+            const dy = e.clientY - lastMouseY;
+            offsetX += dx;
+            offsetY += dy;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+            draw();
+        } else if (isMouseDown) {
+            handleInput(e);
+        }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+        isMouseDown = false;
+        isPanning = false;
+        if (currentMode === 'pan') {
+            canvas.style.cursor = 'grab';
+        } else {
+            canvas.style.cursor = 'crosshair';
+        }
+    });
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Tools
+    function setMode(mode) {
+        currentMode = mode;
+        // Only clear wall/start/end buttons
+        const modeBtns = ['btn-wall', 'btn-erase', 'btn-start', 'btn-end', 'btn-pan'];
+        modeBtns.forEach(id => {
+            const el = document.getElementById(id);
+            if(el) el.classList.remove('active');
+        });
+
+        if (modeBtns.includes('btn-' + mode)) {
+            document.getElementById('btn-' + mode).classList.add('active');
+        }
+        
+        // Update cursor immediately
+        if (mode === 'pan') {
+            canvas.style.cursor = 'grab';
+        } else {
+            canvas.style.cursor = 'crosshair';
+        }
+    }
+
+    function toggleCoords() {
+        showCoords = !showCoords;
+        const btn = document.getElementById('btn-coords');
+        if (showCoords) btn.classList.add('active');
+        else btn.classList.remove('active');
+        draw();
+    }
+
+    function jumpToHex(q, r) {
+        const hex = new Hex(q, r);
+        // Calculate target pixel position (center of screen)
+        const pixel = hexToPixel(hex);
+
+        // We want pixel.x + offsetX = canvas.width / 2
+        // => offsetX = canvas.width / 2 - pixel.x
+        offsetX = canvas.width / 2 - pixel.x;
+        offsetY = canvas.height / 2 - pixel.y;
+
+        draw();
+    }
+
+    function jumpToInput() {
+        const q = parseInt(document.getElementById('jump-q').value);
+        const r = parseInt(document.getElementById('jump-r').value);
+        if (!isNaN(q) && !isNaN(r)) {
+            jumpToHex(q, r);
+        }
+    }
+
+    async function clearWalls() {
+        if (!confirm('确定要清除所有障碍物吗？')) return;
+        
+        walls.clear();
+        updateWallCache();
+        resetPath();
+        draw();
+        
+        // Sync to backend by sending empty map
+        // We can reuse syncMapToBackend since walls is now empty
+        document.getElementById('stats').innerText = 'Clearing Backend...';
+        try {
+            await syncMapToBackend();
+            document.getElementById('stats').innerText = 'Map Cleared';
+        } catch (e) {
+            console.error(e);
+            document.getElementById('stats').innerText = 'Clear Failed';
+        }
+    }
+
+    function resetPath() {
+        visited.clear();
+        updateVisitedCache();
+        path = [];
+        draw();
+        document.getElementById('stats').innerText = 'Ready';
+    }
+
+    function saveMap() {
+        // Optimized Format: Flat Array [q, r, type, q, r, type...]
+        // Reduces JSON size significantly compared to Array of Arrays or String Keys
+        const flatWalls = [];
+        for (const [key, type] of walls) {
+            const parts = key.split(',');
+            flatWalls.push(parseInt(parts[0]), parseInt(parts[1]), type);
+        }
+
+        const data = {
+            width: MAP_WIDTH,
+            height: MAP_HEIGHT,
+            walls: flatWalls
+        };
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `map_${MAP_WIDTH}x${MAP_HEIGHT}_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function loadMap(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (!data.width || !data.height) {
+                    throw new Error('Invalid Map Format: Missing dimensions');
+                }
+
+                document.getElementById('stats').innerText = 'Loading Map...';
+
+                MAP_WIDTH = data.width;
+                MAP_HEIGHT = data.height;
+                
+                // Update Size Dropdown
+                const sizeSelect = document.getElementById('map-size');
+                const sizeVal = `${MAP_WIDTH}`; // Assuming square map from dropdown logic, but handle generic
+                let found = false;
+                for (let i = 0; i < sizeSelect.options.length; i++) {
+                    if (parseInt(sizeSelect.options[i].value) === MAP_WIDTH) {
+                        sizeSelect.selectedIndex = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    // Add new option
+                    const opt = document.createElement('option');
+                    opt.value = MAP_WIDTH;
+                    opt.text = `${MAP_WIDTH} x ${MAP_HEIGHT}`;
+                    sizeSelect.add(opt);
+                    sizeSelect.selectedIndex = sizeSelect.options.length - 1;
+                }
+
+                walls.clear();
+
+                // Format: Flat Array [q, r, type, ...]
+                if (Array.isArray(data.walls)) {
+                    for (let i = 0; i < data.walls.length; i += 3) {
+                        const q = data.walls[i];
+                        const r = data.walls[i+1];
+                        const type = data.walls[i+2];
+                        walls.set(`${q},${r}`, type);
+                    }
+                }
+
+                // Sync to backend
+                await syncMapToBackend();
+                
+                updateWallCache(); // Rebuild cache
+
+                resetPath();
+                draw();
+                document.getElementById('stats').innerText = 'Map Loaded!';
+
+            } catch (err) {
+                console.error(err);
+                alert('Failed to load map: ' + err.message);
+                document.getElementById('stats').innerText = 'Load Failed';
+            }
+            input.value = ''; // Reset
+        };
+        reader.readAsText(file);
+    }
+
+    async function syncMapToBackend() {
+        // Generate RLE string for backend
+        // Format: width height count val count val ...
+        // Note: Backend expects "Rectangular" iteration order: y then x
+
+        let rle = `${MAP_WIDTH} ${MAP_HEIGHT} `;
+
+        let currentType = -1;
+        let count = 0;
+
+        // Performance: Generating string for large map might be slow if we concat strings.
+        // Use array push.
+        const parts = [MAP_WIDTH, MAP_HEIGHT];
+
+        // We assume backend wants binary 0/1, but we pass the actual type > 0
+        // Backend converts > 0 to 1.
+        // So we can just pass the type from walls.
+
+        // Iterate pixels
+        for (let y = 0; y < MAP_HEIGHT; y++) {
+            for (let x = 0; x < MAP_WIDTH; x++) {
+                const key = `${x},${y}`;
+                const type = walls.has(key) ? walls.get(key) : 0;
+
+                if (type === currentType) {
+                    count++;
+                } else {
+                    if (currentType !== -1) {
+                        parts.push(count);
+                        parts.push(currentType);
+                    }
+                    currentType = type;
+                    count = 1;
+                }
+            }
+        }
+        if (count > 0) {
+            parts.push(count);
+            parts.push(currentType);
+        }
+
+        const body = parts.join(' ');
+
+        const response = await fetch('/api/load', {
+            method: 'POST',
+            body: body // Send raw text body
+        });
+
+        if (!response.ok) throw new Error('Backend sync failed');
+    }
+
+    function zoomMap(factor, centerX, centerY) {
+        const newSize = HEX_SIZE * factor;
+        // Allow zooming out much further (down to 0.1) for large maps
+        if (newSize < 0.1 || newSize > 200) return;
+
+        // Zoom towards center if no point provided
+        if (centerX === undefined) {
+            centerX = canvas.width / 2;
+            centerY = canvas.height / 2;
+        }
+
+        // Logic: Keep the world coordinate under the mouse/center stable
+        // WorldCoord = (ScreenCoord - Offset) / OldScale
+        // NewOffset = ScreenCoord - WorldCoord * NewScale
+        // Since everything scales with HEX_SIZE linearly:
+
+        const worldX = (centerX - offsetX) / HEX_SIZE;
+        const worldY = (centerY - offsetY) / HEX_SIZE;
+
+        HEX_SIZE = newSize;
+
+        offsetX = centerX - worldX * HEX_SIZE;
+        offsetY = centerY - worldY * HEX_SIZE;
+
+        draw();
+    }
+
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomIntensity = 0.1;
+        const direction = e.deltaY < 0 ? 1 : -1;
+        const factor = 1 + (direction * zoomIntensity);
+
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        zoomMap(factor, mouseX, mouseY);
+    }, { passive: false });
+
+    async function generateMap() {
+            const size = parseInt(document.getElementById('map-size').value);
+            if (!confirm(`这将生成新的 ${size}x${size} 地图，确定吗？`)) return;
+
+            document.getElementById('stats').innerText = 'Requesting Map...';
+            try {
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ width: size, height: size })
+                });
+                if (!response.ok) throw new Error('Server returned ' + response.status);
+
+                const text = await response.text();
+                document.getElementById('stats').innerText = 'Processing Data...';
+
+                // Manual scanning to avoid giant array allocation and splitting freeze
+                let pos = 0;
+                const len = text.length;
+
+                function readNext() {
+                    // Skip whitespace
+                    while (pos < len && text.charCodeAt(pos) <= 32) pos++;
+                    if (pos >= len) return null;
+
+                    const start = pos;
+                    while (pos < len && text.charCodeAt(pos) > 32) pos++;
+                    return parseInt(text.substring(start, pos), 10);
+                }
+
+                // Skip "MAP_DATA" if present (though server usually sends raw RLE data in body)
+                // But wait, server.js sends `rleData` which is substring(9).
+                // So text starts with Width.
+
+                const w = readNext();
+                const h = readNext();
+
+                if (w === null || h === null) {
+                    throw new Error('Invalid Map Data');
+                }
+
+                // Update Global Map Config
+            MAP_WIDTH = w;
+            MAP_HEIGHT = h;
+            
+            // Adjust Zoom to fit screen nicely, but keep anchor at bottom-left
+            // Calculate ideal hex size to fit width or height, maxing at 15
+            const fitW = (canvas.width - 100) / (w * SQRT3);
+            const fitH = (canvas.height - 100) / (h * 1.5);
+            // Allow fractional sizes for large maps
+            HEX_SIZE = Math.min(15, Math.min(fitW, fitH));
+            if (HEX_SIZE < 0.1) HEX_SIZE = 0.1;
+
+            // Anchor (0,0) to Bottom-Left
+            offsetX = 50;
+            offsetY = canvas.height - 50;
+            
+            walls.clear();
+            wallsCache = [];
+                let x = 0, y = 0;
+
+                function parseChunk() {
+                    const startTime = performance.now();
+
+                    while (pos < len) {
+                        const count = readNext();
+                        const type = readNext();
+
+                        if (count === null) break;
+
+                        if (type !== 0) {
+                            for (let i = 0; i < count; i++) {
+                                // Store as Offset(col, row) directly to match renderer
+                                walls.set(`${x},${y}`, type);
+                                
+                                // Incremental Cache Update for responsiveness
+                                let color = '#808080';
+                                if (type === 1) color = '#5c5c5c';
+                                else if (type === 2) color = '#00BFFF';
+                                else if (type === 3) color = '#cd5c5c';
+                                else if (type === 4) color = '#800080';
+                                else if (type === 5) color = '#228b22';
+                                wallsCache.push({q: x, r: y, color: color});
+
+                                x++;
+                                if (x >= w) { x = 0; y++; }
+                            }
+                        } else {
+                            // Plain - optimize advance
+                            const total = y * w + x + count;
+                            y = Math.floor(total / w);
+                            x = total % w;
+                        }
+
+                        // Yield every 16ms to keep UI responsive
+                        if (performance.now() - startTime > 16) {
+                            const progress = Math.round((pos / len) * 100);
+                            document.getElementById('stats').innerText = `Generating: ${progress}%`;
+                            requestAnimationFrame(parseChunk);
+                            return;
+                        }
+                    }
+
+                    updateWallCache();
+                    resetPath();
+                    document.getElementById('stats').innerText = 'Map Ready!';
+                    draw();
+                }
+
+                parseChunk();
+
+            } catch (e) {
+                console.error(e);
+                document.getElementById('stats').innerText = 'Generation Failed: ' + e.message;
+            }
+        }
+
+    /**
+     * 6. 寻路算法 (Server-Side)
+     */
+    let vizState = {
+        running: false,
+        paused: false,
+        speedFactor: 1.0,
+        baseBatchSize: 20,
+        visitedList: [],
+        visitedIndex: 0,
+        pathData: null,
+        animationId: null
+    };
+
+    function changeSpeed(dir) {
+        if (dir === -1) vizState.speedFactor = Math.max(0.1, vizState.speedFactor / 1.5);
+        else vizState.speedFactor = Math.min(10, vizState.speedFactor * 1.5);
+    }
+
+    function togglePause() {
+        if (!vizState.running) return;
+        vizState.paused = !vizState.paused;
+        updatePauseBtn();
+        if (!vizState.paused) animateStep();
+    }
+
+    function updatePauseBtn() {
+        const btn = document.getElementById('btn-pause');
+        if (vizState.paused) btn.innerText = '▶';
+        else btn.innerText = '⏸';
+    }
+
+    function animateStep() {
+        if (!vizState.running) return;
+        if (vizState.paused) return;
+
+        // Calculate current batch size
+        const batch = Math.ceil(vizState.baseBatchSize * vizState.speedFactor);
+
+        // Draw multiple nodes per frame
+        for(let k=0; k < batch && vizState.visitedIndex < vizState.visitedList.length; k++) {
+            const v = vizState.visitedList[vizState.visitedIndex++];
+            const key = `${v.q},${v.r}`;
+            if (!visited.has(key)) {
+                visited.set(key, true);
+                visitedCache.push({q: v.q, r: v.r});
+            }
+        }
+
+        draw();
+
+        if (vizState.visitedIndex < vizState.visitedList.length) {
+            vizState.animationId = requestAnimationFrame(animateStep);
+        } else {
+            // Done, show path
+            const data = vizState.pathData;
+            if (data.found && data.path) {
+                 path = data.path.map(p => new Hex(p.q, p.r));
+                 document.getElementById('stats').innerText = `Path Found! Length: ${path.length}. Visited: ${visited.size}`;
+            } else {
+                 document.getElementById('stats').innerText = `No Path Found. Visited: ${visited.size}`;
+            }
+            draw();
+            vizState.running = false;
+            vizState.paused = false;
+            updatePauseBtn();
+        }
+    }
+
+    async function startPathfinding() {
+        if (!startHex || !endHex) return;
+
+        // Stop previous animation if running
+        if (vizState.running) {
+            vizState.running = false;
+            if (vizState.animationId) cancelAnimationFrame(vizState.animationId);
+        }
+
+        resetPath();
+        document.getElementById('stats').innerText = 'Searching...';
+
+        try {
+            const algo = document.getElementById('algo-select').value;
+            const response = await fetch('/api/path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ start: startHex, end: endHex, algo: algo })
+            });
+
+            if (!response.ok) {
+                 document.getElementById('stats').innerText = 'Server Busy or Error';
+                 return;
+            }
+
+            const data = await response.json();
+
+            // Initialize Viz State
+            const visitedList = data.visited || [];
+
+            // Base speed: finish in ~1.5s (90 frames)
+            vizState.baseBatchSize = Math.max(1, Math.ceil(visitedList.length / 90));
+            vizState.speedFactor = 1.0;
+            vizState.paused = false;
+            vizState.running = true;
+            vizState.visitedList = visitedList;
+            vizState.visitedIndex = 0;
+            vizState.pathData = data;
+
+            updatePauseBtn();
+            animateStep();
+
+        } catch (e) {
+            console.error(e);
+            document.getElementById('stats').innerText = 'Connection Error';
+        }
+    }
+
+    // Initial Draw
+    resize();
+    updatePointStats();
+    setMode('pan'); // Ensure cursor and state are consistent
+
+    // Benchmark UI
+    const modal = document.getElementById('benchmark-modal');
+    function closeBenchmarkModal() {
+        modal.style.display = "none";
+    }
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    }
+
+    const AVAILABLE_ALGOS = [
+        "AStar", "JPS", "HJPS", "BFS", "BiAStar", "DHPAStar", "DHPAJps", "FlowField", "DStarLite"
+    ];
+
+    function getSavedAlgoSelection() {
+        const saved = localStorage.getItem('benchmark_algos');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch (e) { console.error('Failed to parse saved algos', e); }
+        }
+        // Default: all checked
+        return {};
+    }
+
+    function saveAlgoSelection() {
+        const selection = {};
+        AVAILABLE_ALGOS.forEach(algo => {
+            const checkbox = document.getElementById(`bench-${algo}`);
+            if (checkbox) {
+                selection[algo] = checkbox.checked;
+            }
+        });
+        localStorage.setItem('benchmark_algos', JSON.stringify(selection));
+    }
+
+    function initBenchmarkUI() {
+        const container = document.getElementById('algo-checkboxes');
+        container.innerHTML = '';
+        
+        const selection = getSavedAlgoSelection();
+        
+        AVAILABLE_ALGOS.forEach(algo => {
+            // Default to true if key missing (undefined)
+            const isChecked = selection[algo] !== false;
+            
+            const div = document.createElement('div');
+            div.innerHTML = `
+                <input type="checkbox" id="bench-${algo}" value="${algo}" ${isChecked ? 'checked' : ''} onchange="saveAlgoSelection()">
+                <label for="bench-${algo}">${algo}</label>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function selectAllAlgos(checked) {
+        AVAILABLE_ALGOS.forEach(algo => {
+            const cb = document.getElementById(`bench-${algo}`);
+            if (cb) cb.checked = checked;
+        });
+        saveAlgoSelection();
+    }
+
+    function runBenchmarkUI() {
+        if (!startHex || !endHex) {
+            alert("请先设置起点和终点！");
+            return;
+        }
+        initBenchmarkUI();
+        document.getElementById('benchmark-config').style.display = 'block';
+        document.getElementById('benchmark-results').innerHTML = '';
+        modal.style.display = "block";
+    }
+
+    async function runSelectedBenchmark() {
+        const selected = [];
+        AVAILABLE_ALGOS.forEach(algo => {
+            if (document.getElementById(`bench-${algo}`).checked) {
+                selected.push(algo);
+            }
+        });
+
+        if (selected.length === 0) {
+            alert("请至少选择一个算法！");
+            return;
+        }
+
+        const container = document.getElementById('benchmark-results');
+        container.innerHTML = '<p style="text-align:center; padding: 20px;">正在进行基准测试 (运行 10 次取平均值)...<br>请稍候...</p>';
+        
+        // Hide config to prevent double submission, or just disable button?
+        // Let's keep it visible but maybe disabled. simpler to just overwrite results div.
+
+        try {
+            const response = await fetch('/api/path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    start: startHex, 
+                    end: endHex, 
+                    algo: 'BENCHMARK',
+                    targets: selected 
+                })
+            });
+
+            if (!response.ok) throw new Error('Server Error');
+
+            const results = await response.json();
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>算法名称</th>
+                            <th>路径长度</th>
+                            <th>耗时 (μs)</th>
+                            <th>耗时 (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            results.forEach(res => {
+                html += `
+                    <tr>
+                        <td>${res.name}</td>
+                        <td>${res.pathLength}</td>
+                        <td>${res.timeUs.toFixed(2)}</td>
+                        <td>${(res.timeUs / 1000).toFixed(3)}</td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            container.innerHTML = html;
+
+        } catch (e) {
+            container.innerHTML = `<p style="color:red; padding: 20px;">测试失败: ${e.message}</p>`;
+        }
+    }
+
+
+</script>
+</body>
+</html>
