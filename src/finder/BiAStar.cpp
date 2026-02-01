@@ -67,15 +67,16 @@ std::vector<Hex> BiAStar::findPath(Hex start, Hex end) {
     std::priority_queue<PQNode, std::vector<PQNode>, std::greater<PQNode>> openFwd;
     std::priority_queue<PQNode, std::vector<PQNode>, std::greater<PQNode>> openBwd;
 
-    // 启发式函数
-    auto heuristic = [&](int idx, const Hex& target) -> unsigned int {
-        // 【优化】乘以 1001 而不是 1000 用于 Tie-Breaking (打破平局)
-        // 这会让 A* 在代价相同的路径中优先选择更靠近终点的，减少节点扩展
-        return (unsigned int)getHex(idx).distance(target) * 1001;
+    // 启发式函数 - 预计算目标坐标
+    Hex startHexCoord = getHex(startIdx);
+    Hex endHexCoord = getHex(endIdx);
+    
+    auto heuristic = [&](const Hex& h, const Hex& target) -> unsigned int {
+        return (unsigned int)h.distance(target) * 1001;
     };
 
-    openFwd.push({heuristic(startIdx, end), startIdx});
-    openBwd.push({heuristic(endIdx, start), endIdx});
+    openFwd.push({heuristic(startHexCoord, endHexCoord), startIdx});
+    openBwd.push({heuristic(endHexCoord, startHexCoord), endIdx});
 
     int meetIdx = -1;
     unsigned int bestPathLen = 0xFFFFFFFF;
@@ -138,14 +139,14 @@ std::vector<Hex> BiAStar::findPath(Hex start, Hex end) {
                     vNode.gScoreFwd = newG;
                     vNode.parentFwd = uIdx;
                     vNode.visitMask |= MASK_FWD;
-                    openSet.push({newG + heuristic(vIdx, end), vIdx});
+                    openSet.push({newG + heuristic(vHex, endHexCoord), vIdx});
                 }
             } else {
                 if (newG < vNode.gScoreBwd) {
                     vNode.gScoreBwd = newG;
                     vNode.parentBwd = uIdx;
                     vNode.visitMask |= MASK_BWD;
-                    openSet.push({newG + heuristic(vIdx, start), vIdx});
+                    openSet.push({newG + heuristic(vHex, startHexCoord), vIdx});
                 }
             }
         }
@@ -167,10 +168,10 @@ std::vector<Hex> BiAStar::findPath(Hex start, Hex end) {
         // 这在“血管状”或迷宫地图中极其有效，避免一方扩散过大
         if (openFwd.size() < openBwd.size()) {
             // 如果找到了路径，立即 break
-            if (expand(openFwd, true, end)) break;
+            if (expand(openFwd, true, endHexCoord)) break;
         } else {
             // 如果找到了路径，立即 break
-            if (expand(openBwd, false, start)) break;
+            if (expand(openBwd, false, startHexCoord)) break;
         }
     }
 

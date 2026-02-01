@@ -4,8 +4,9 @@
 #include <vector>
 #include <chrono>
 #include <iomanip>
-#include <map>
+#include <unordered_map>
 #include <memory>
+#include <algorithm>
 
 #include "common/Types.h"
 #include "common/Hex.h"
@@ -20,7 +21,6 @@
 #include "finder/JPS.h"
 #include "finder/FlowField.h"
 #include "finder/DHPAJps.h"
-#include "finder/DStarLite.h"
 #include "finder/HJPS.h"
 
 #ifdef VIZ_SUPPORT
@@ -29,7 +29,7 @@
 #endif
 
 // Finder Factory
-std::map<std::string, std::unique_ptr<IFinder>> g_finders;
+std::unordered_map<std::string, std::unique_ptr<IFinder>> g_finders;
 
 void registerFinders(HexMap& map) {
     g_finders["AStar"] = std::make_unique<AStar>(map);
@@ -40,52 +40,98 @@ void registerFinders(HexMap& map) {
     g_finders["DHPAStar"] = std::make_unique<DHPAStar>(map);
     g_finders["DHPAJps"] = std::make_unique<DHPAJps>(map);
     g_finders["FlowField"] = std::make_unique<FlowField>(map);
-    g_finders["DStarLite"] = std::make_unique<DStarLite>(map);
 }
+
+struct BenchmarkResult {
+    std::string name;
+    size_t pathLen;
+    double avgTimeUs;
+    bool foundPath;
+};
 
 void runBenchmark(Hex start, Hex end, int iterations, std::string label) {
     std::cout << "------------------------------------------------" << std::endl;
     std::cout << "Benchmark: " << label << " (" << start.q << "," << start.r << ") -> (" << end.q << "," << end.r << ")" << std::endl;
     
+    std::vector<BenchmarkResult> results;
+    results.reserve(g_finders.size());
+    
+    // 先收集所有结果
     for (auto& kv : g_finders) {
         IFinder* finder = kv.second.get();
-        std::cout << "  Algorithm: " << finder->getName() << std::endl;
         
         auto path = finder->findPath(start, end);
         if (path.empty()) {
-            std::cout << "    [Result] No path found!" << std::endl;
+            results.push_back({finder->getName(), 0, 0.0, false});
             continue;
         }
-        std::cout << "    [Result] Path length: " << path.size() << std::endl;
-
+        
         auto t_start = std::chrono::high_resolution_clock::now();
+        size_t totalPathLen = 0;
         for (int i = 0; i < iterations; ++i) {
-            volatile auto p = finder->findPath(start, end);
+            auto p = finder->findPath(start, end);
+            totalPathLen += p.size();
         }
         auto t_end = std::chrono::high_resolution_clock::now();
+        (void)totalPathLen;
         
         double total_us = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count();
         double avg_us = total_us / iterations;
         
+        results.push_back({finder->getName(), path.size(), avg_us, true});
+    }
+    
+    // 按耗时排序（快的在前）
+    std::sort(results.begin(), results.end(), [](const BenchmarkResult& a, const BenchmarkResult& b) {
+        // 找到路径的排前面，再按时间排序
+        if (a.foundPath != b.foundPath) return a.foundPath > b.foundPath;
+        return a.avgTimeUs < b.avgTimeUs;
+    });
+    
+    // 按排序后的顺序输出
+    for (const auto& r : results) {
+        std::cout << "  Algorithm: " << r.name << std::endl;
+        if (!r.foundPath) {
+            std::cout << "    [Result] No path found!" << std::endl;
+            continue;
+        }
+        std::cout << "    [Result] Path length: " << r.pathLen << std::endl;
         std::cout << std::fixed << std::setprecision(2);
-        std::cout << "    [Perf] Avg Time: " << avg_us << " us (" << avg_us / 1000.0 << " ms)" << std::endl;
+        std::cout << "    [Perf] Avg Time: " << r.avgTimeUs << " us (" << r.avgTimeUs / 1000.0 << " ms)" << std::endl;
     }
 }
 
-// JSON helper (simple manual construction to avoid deps)
+// JSON helper (optimized string concatenation)
 std::string formatBenchmarkResult(const std::string& name, size_t pathLen, double timeUs, size_t visitedCount) {
-    std::stringstream ss;
-    ss << "{\"name\":\"" << name << "\", \"pathLength\":" << pathLen 
-       << ", \"timeUs\":" << std::fixed << std::setprecision(2) << timeUs 
-       << ", \"visited\":" << visitedCount << "}";
-    return ss.str();
+    std::string result;
+    result.reserve(128 + name.size());
+    result += "{\"name\":\"";
+    result += name;
+    result += "\",\"pathLength\":";
+    result += std::to_string(pathLen);
+    result += ",\"timeUs\":";
+    
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.2f", timeUs);
+    result += buf;
+    
+    result += ",\"visited\":";
+    result += std::to_string(visitedCount);
+    result += "}";
+    return result;
 }
 
+struct InteractiveResult {
+    std::string name;
+    size_t pathLen;
+    double timeUs;
+};
+
 void runBenchmarkInteractive(Hex start, Hex end, const std::vector<std::string>& filter = {}) {
-    std::cout << "BENCH_START" << std::endl;
-    std::cout << "["; // Start JSON array
+    std::vector<InteractiveResult> results;
+    results.reserve(g_finders.size());
     
-    bool first = true;
+    // 先收集所有结果
     for (auto& kv : g_finders) {
         if (!filter.empty()) {
             bool found = false;
@@ -100,25 +146,37 @@ void runBenchmarkInteractive(Hex start, Hex end, const std::vector<std::string>&
         // Warmup
         finder->findPath(start, end);
         
-        // Measure
+        // Measure with result accumulation to prevent optimization
         auto t_start = std::chrono::high_resolution_clock::now();
-        int iterations = 10;
+        const int iterations = 10;
+        size_t totalPathLen = 0;
+        std::vector<Hex> lastPath;
         for (int i = 0; i < iterations; ++i) {
-            volatile auto p = finder->findPath(start, end);
+            lastPath = finder->findPath(start, end);
+            totalPathLen += lastPath.size();
         }
         auto t_end = std::chrono::high_resolution_clock::now();
-        
-        // Get Stats (Run once more to capture path len and visited count if needed, 
-        // but for now IFinder doesn't expose visited count easily without VIZ macro.
-        // We can approximate or just report time/len.
-        // Actually, let's just run one real pass to get path length.
-        auto path = finder->findPath(start, end);
+        (void)totalPathLen;
         
         double total_us = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count();
         double avg_us = total_us / iterations;
         
+        results.push_back({finder->getName(), lastPath.size(), avg_us});
+    }
+    
+    // 按耗时排序（快的在前）
+    std::sort(results.begin(), results.end(), [](const InteractiveResult& a, const InteractiveResult& b) {
+        return a.timeUs < b.timeUs;
+    });
+    
+    // 输出排序后的 JSON
+    std::cout << "BENCH_START" << std::endl;
+    std::cout << "["; // Start JSON array
+    
+    bool first = true;
+    for (const auto& r : results) {
         if (!first) std::cout << ",";
-        std::cout << formatBenchmarkResult(finder->getName(), path.size(), avg_us, 0); // Visited count not exposed yet in interface
+        std::cout << formatBenchmarkResult(r.name, r.pathLen, r.timeUs, 0);
         first = false;
     }
     

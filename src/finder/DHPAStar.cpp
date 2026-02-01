@@ -3,7 +3,7 @@
 #include <chrono>
 #include <queue>
 #include <iostream>
-#include <map>
+#include <unordered_map>
 #include <unordered_set>
 
 DHPAStar::DHPAStar(HexMap& m) : map(m), localSolver(m) {}
@@ -21,7 +21,7 @@ void DHPAStar::buildGraph() {
 
     clusters.clear(); abstractGraph.clear();
     
-    std::map<int, std::map<int, std::vector<Hex>>> rawConnections;
+    std::unordered_map<int, std::unordered_map<int, std::vector<Hex>>> rawConnections;
     
     for (int y = 0; y < map.height; ++y) {
         for (int x = 0; x < map.width; ++x) {

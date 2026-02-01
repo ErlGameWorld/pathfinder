@@ -68,12 +68,8 @@ int64_t AStar::findPathInternal(Hex start, Hex end, std::vector<Hex>* outPath, i
     // 2. 状态管理
     // ---------------------------------------------------------
 
-    size_t requiredSize = (size_t)map.width * (size_t)map.height;
-    if (nodeData.size() != requiredSize) {
-        nodeData.resize(requiredSize);
-        openSetContainer.reserve(requiredSize / 8);
-        currentGen = 0;
-    }
+    // 注意：reset() 已经处理了内存大小检查和初始化
+    // 这里只需要重置当前代计数和清空开放集
 
     if (currentGen == 0) {
         std::fill(nodeData.begin(), nodeData.end(), NodeData());

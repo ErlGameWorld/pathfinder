@@ -45,52 +45,55 @@ bool JPS::hasForcedNeighbors(const Hex& curr, int dirIdx) {
     return false;
 }
 
+// JPS.cpp
+
+// 1. 修正 hasForcedNeighbors (逻辑没大问题，但可以稍微整理，保持原样即可)
+// ... (保留你的实现，它是正确的)
+
 Hex JPS::jump(const Hex& from, int dirIdx, const Hex& end) {
     const Hex dirVec = HEX_DIRS[dirIdx];
 
     // 第一步不可走：直接失败
-    Hex first = from + dirVec;
-    if (!map.isWalkable(first)) return INVALID_HEX;
+    Hex cur = from + dirVec;
+    if (!map.isWalkable(cur)) return INVALID_HEX;
 
-    Hex prev = from;
-    Hex cur  = from;
+    // 预计算目标的 S 坐标
+    int endS = -end.q - end.r;
+
+    // 预计算方向向量的 S 分量
+    int dirS = -dirVec.q - dirVec.r;
 
     while (true) {
-        cur = cur + dirVec;
-
-        // 撞墙/越界：prev 是走廊尽头，作为跳点返回（允许转弯）
-        if (!map.isWalkable(cur)) return prev;
-
+        // 1. 到达目标
         if (cur == end) return cur;
 
-        // 强制邻居：跳点
+        // 2. 发现强制邻居 (Forced Neighbor) -> 是跳点
         if (hasForcedNeighbors(cur, dirIdx)) return cur;
 
-        // ===== 关键补全：空地也能拐弯 =====
-        // 若继续前进不再让你更接近目标，则在此处返回作为“拐弯跳点”
-        Hex fwd = cur + dirVec;
-        if (!map.isWalkable(fwd)) {
-            // 前方下一步撞墙：cur 是尽头
-            return cur;
-        }
-        int hCur = cur.distance(end);
-        int hFwd = fwd.distance(end);
-        if (hFwd >= hCur) {
-            return cur;
-        }
-        // ===============================
+        // 3. 几何对齐优化 (保留这个，这是速度的关键)
+        // 在空地上，一旦坐标轴与目标对齐，就停下来，防止冲过头
+        int curS = -cur.q - cur.r;
+        if (dirVec.q != 0 && cur.q == end.q) return cur;
+        if (dirVec.r != 0 && cur.r == end.r) return cur;
+        if (dirS != 0 && curS == endS) return cur;
 
-        prev = cur;
+        // 4. 撞墙预判 (关键修正！)
+        Hex next = cur + dirVec;
+        if (!map.isWalkable(next)) {
+            // 【修正】：之前让你返回 INVALID_HEX，导致进山进不去。
+            // 现在改为：如果下一步撞墙，就把当前点(cur)作为跳点返回。
+            // 这样算法会在墙边停下，并在下一轮扩展中尝试转向(依靠 Natural Neighbors)。
+            return cur;
+        }
+
+        // 继续跳跃
+        cur = next;
     }
 }
 
 std::vector<Hex> JPS::findPath(Hex start, Hex end) {
-    size_t requiredSize = (size_t)map.width * (size_t)map.height;
-    if (nodeData.size() != requiredSize) {
-        nodeData.resize(requiredSize);
-        std::fill(nodeData.begin(), nodeData.end(), Node());
-        currentGen = 0;
-    }
+    // reset() 已经处理了内存大小检查和初始化
+    // 这里只需要处理代计数溢出
 
     if (!map.isWalkable(start) || !map.isWalkable(end)) return {};
     if (start == end) return { start };

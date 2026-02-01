@@ -29,8 +29,17 @@ struct Hex {
 
 namespace std {
     template <> struct hash<Hex> {
-        size_t operator()(const Hex& h) const {
-            return (size_t(h.q) * 0x1f1f1f1f) ^ size_t(h.r);
+        size_t operator()(const Hex& h) const noexcept {
+            // 使用更好的哈希组合方式，减少冲突
+            // 基于 Thomas Wang 的整数哈希算法
+            size_t hq = static_cast<size_t>(h.q);
+            size_t hr = static_cast<size_t>(h.r);
+            hq = (hq ^ 61) ^ (hq >> 16);
+            hq = hq + (hq << 3);
+            hq = hq ^ (hq >> 4);
+            hq = hq * 0x27d4eb2d;
+            hq = hq ^ (hq >> 15);
+            return hq ^ (hr + 0x9e3779b9 + (hq << 6) + (hq >> 2));
         }
     };
 }

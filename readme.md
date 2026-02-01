@@ -16,16 +16,39 @@ Odd-R 布局（奇数行偏移）
 
 ## 🧠 支持的算法
 
-本项目实现了以下寻路算法，可在界面中实时切换：
+本项目实现了以下寻路算法，可在界面中实时切换。所有算法代码均位于 `src/finder/` 目录下：
 
-1.  **A\*** (A-Star): 经典的启发式搜索算法，寻找最短路径的标准。
-2.  **Bi-Directional A\***: 双向 A*，同时从起点和终点搜索，通常比单向 A* 更快。
-3.  **BFS** (Breadth-First Search): 广度优先搜索，用于寻找无权图的最短路径，作为基准对比。
-4.  **Hex JPS** (Jump Point Search): 针对六边形网格优化的跳点搜索，在开阔区域能极大减少搜索节点数。
-5.  **Flow Field** (Vector Field): 流场算法，基于 Dijkstra 生成全局矢量场，适合海量单位寻路。
-6.  **D\* Lite**: 增量式搜索算法，专为动态环境设计。当障碍物发生变化时，仅重新计算受影响的部分。
-7.  **DHPA\*** (Dynamic Hierarchical Pathfinding A*): 分层寻路算法。将地图抽象为聚类图（Cluster Graph），在大地图长距离寻路中性能卓越。
-8.  **DHPA-JPS**: 结合了分层思想与 JPS 的变体。在分层图的底层构建中使用 JPS 加速，进一步提升预处理和细化效率。
+1.  **BFS (Breadth-First Search)**
+    *   **描述**: 广度优先搜索，用于寻找无权图的最短路径，常作为基准对比。
+    *   **实现**: [BFS.cpp](src/finder/BFS.cpp)。使用 `std::vector` 手动模拟队列以优化内存分配，性能优于标准 `std::queue`。
+
+2.  **A\*** (A-Star)
+    *   **描述**: 经典的启发式搜索算法，寻找最短路径的标准方案。
+    *   **实现**: [AStar.cpp](src/finder/AStar.cpp)。采用二叉堆 (`std::make_heap`) 优化的优先队列，使用曼哈顿距离作为启发函数。
+
+3.  **Bi-Directional A\***
+    *   **描述**: 双向 A*，同时从起点和终点进行搜索，通常比单向 A* 更快相遇。
+    *   **实现**: [BiAStar.cpp](src/finder/BiAStar.cpp)。使用位掩码 (`visitMask`) 标记正向/反向访问状态，并复用内存池。
+
+4.  **JPS (Jump Point Search)**
+    *   **描述**: 针对六边形网格优化的跳点搜索算法，在开阔区域能极大减少搜索节点数。
+    *   **实现**: [JPS.cpp](src/finder/JPS.cpp)。基础版本的 Hex JPS 实现，主要进行直线扫描。
+
+5.  **HJPS (Hierarchical/Hex JPS)**
+    *   **描述**: 基于论文《基于正六边形栅格 JPS 算法的智能路径规划》的改进版 JPS。
+    *   **实现**: [HJPS.cpp](src/finder/HJPS.cpp)。实现了递归侧向探测 (Recursive Lateral Check) 和严格的强制邻居剪枝规则，在复杂地形下比普通 JPS 更健壮。
+
+6.  **Flow Field**
+    *   **描述**: 流场算法 (Vector Field)，基于 Dijkstra 生成全局矢量场。
+    *   **实现**: [FlowField.cpp](src/finder/FlowField.cpp)。适合 RTS 游戏中海量单位共享同一个目标点，一次计算即可服务所有单位。
+
+7.  **DHPA\*** (Dynamic Hierarchical Pathfinding A*)
+    *   **描述**: 分层寻路算法。将地图抽象为聚类图（Cluster Graph），在大地图长距离寻路中性能卓越。
+    *   **实现**: [DHPAStar.cpp](src/finder/DHPAStar.cpp)。将地图分割为 Block，构建抽象图进行搜索。
+
+8.  **DHPA-JPS**
+    *   **描述**: DHPA* 的变体。
+    *   **实现**: [DHPAJps.cpp](src/finder/DHPAJps.cpp)。在分层图的底层构建和局部路径细化中使用 JPS 加速。
 
 ## � 算法选择建议
 
@@ -35,14 +58,13 @@ Odd-R 布局（奇数行偏移）
 *   **单位极多 (RTS/群组寻路)**：**Flow Fields** (流场算法)。一次计算即可支持成百上千个单位向同一目标移动。
 *   **超大地图 (长距离)**：**DHPA\*** (分层寻路)。通过预处理抽象图，极大减少长距离搜索的节点数。
 *   **极致单体速度 (开阔地)**：**Hexagonal JPS**。如果地图开阔区域较多，JPS 能比 A* 快数倍。
-*   **动态环境 (频繁地形变化)**：**D\* Lite**。利用上次搜索结果进行增量更新，避免全图重算。
 
-## �📂 目录结构
+## 📂 目录结构
 
 ```text
 e:/pathfinder/
 ├── src/
-│   ├── finder/         # 寻路算法实现 (AStar, JPS, DStarLite, DHPA* 等)
+│   ├── finder/         # 寻路算法实现 (AStar, JPS, DHPA* 等)
 │   ├── common/         # 通用数据结构 (Hex, Types, Macros)
 │   ├── map/            # 地图逻辑 (HexMap, MapGenerator)
 │   └── main.cpp        # 程序入口与协议处理
@@ -144,3 +166,4 @@ C++ 后端通过标准输入输出 (Stdio) 与 Node.js 服务器通信。支持�
 | **其他** | Obstacle | 障碍物 | 其他未定义 ID 默认视为通用障碍物 |
 
 ---
+*Created by Trae AI Assistant*

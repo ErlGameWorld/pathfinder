@@ -2,11 +2,13 @@
 #include "IFinder.h"
 #include "../map/HexMap.h"
 #include <vector>
+#include <queue>
 
 class FlowField : public IFinder {
     HexMap& map;
     std::vector<int> parentMap; // Index -> Parent Index (towards End)
     Hex currentEnd;
+    std::queue<int> openQueue;  // Incremental build queue
     bool built = false;
 
 public:
