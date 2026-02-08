@@ -1,9 +1,11 @@
+//Hex.h
 #pragma once
 
 #include <cmath>
 #include <functional>
 #include <vector>
 #include <cstdlib>
+#include <algorithm>
 
 struct Hex {
     int q, r;
@@ -20,8 +22,14 @@ struct Hex {
     Hex operator-(const Hex& other) const { return Hex(q - other.q, r - other.r); }
     
     // Manhattan distance (Hex grid)
-    int distance(const Hex& b) const {
-        return (std::abs(q - b.q) + std::abs(q + r - b.q - b.r) + std::abs(r - b.r)) / 2;
+    //int distance(const Hex& b) const {
+    //    return (std::abs(q - b.q) + std::abs(q + r - b.q - b.r) + std::abs(r - b.r)) / 2;
+    //}
+
+    // 六边形曼哈顿距离
+    int distance(const Hex& o) const {
+        int dq = o.q - q, dr = o.r - r, ds = -dq - dr;
+        return std::max({std::abs(dq), std::abs(dr), std::abs(ds)});
     }
 
     Hex neighbor(int dir) const;

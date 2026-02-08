@@ -1,3 +1,4 @@
+//HexMap.h
 #pragma once
 
 #include <vector>
@@ -6,7 +7,18 @@
 #include "../common/Hex.h"
 #include "../common/Types.h"
 
-class HexMap {
+// ============================================================================
+// 六边形地图接口
+// ============================================================================
+class IHexMap {
+public:
+    virtual ~IHexMap() = default;
+    virtual int getWidth() const = 0;
+    virtual int getHeight() const = 0;
+    virtual bool isBlocked(int index) const = 0;  // true = 障碍物
+};
+
+class HexMap : public IHexMap {
 public:
     int width, height;
     int clustersX, clustersY;
@@ -21,6 +33,11 @@ public:
     HexMap(int w, int h);
     ~HexMap() = default;
 
+
+    // 通过索引直接检查（避免坐标转换）
+    inline bool isWalkableByIndex(int idx) const {
+        return grid[idx] == 0;  // 直接访问
+    }
     // ---------------------------------------------------------
     // 核心高性能内联函数 (供 BFS/A*/JPS 及其它算法使用)
     // ---------------------------------------------------------
@@ -88,4 +105,9 @@ public:
     int getClusterId(const Hex& h) const;
 
     void resize(int w, int h);
+    
+    // IHexMap接口实现
+    int getWidth() const override { return width; }
+    int getHeight() const override { return height; }
+    bool isBlocked(int index) const override { return !isWalkableIdx(index); }
 };

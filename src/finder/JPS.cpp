@@ -1,230 +1,450 @@
+//JSP.cpp
 #include "JPS.h"
-#include "../common/VizMacros.h"
+#include <cmath>
 #include <algorithm>
+#include "../common/VizMacros.h"
 
-const Hex JPS::INVALID_HEX = Hex(-99999, -99999);
-
+// ============================================================================
+// 初始化与重置
+// ============================================================================
 JPS::JPS(HexMap& m) : map(m) {
-    nodeData.resize((size_t)map.width * (size_t)map.height);
+    ensureCapacity();
+}
+
+void JPS::ensureCapacity() {
+    int w = map.width;
+    int h = map.height;
+    int size = w * h;
+
+    if (w == lastWidth && h == lastHeight && size == mapSize) return;
+
+    lastWidth = w;
+    lastHeight = h;
+    mapSize = size;
+
+    // 重新分配内存
+    neighborIndex.assign(static_cast<size_t>(size) * 6, -1);
+    coordQ.resize(size);
+    coordR.resize(size);
+    nodeData.assign(size, Node{});
+
+    // 缓存扩容
+    jumpCacheGen.assign(static_cast<size_t>(size) * 6, 0);
+    jumpCacheResult.assign(static_cast<size_t>(size) * 6, -1);
+
+    // 预留 OpenList 空间
+    openList.reserve(1024);
+
+    rebuildGeometryTables();
+}
+
+void JPS::rebuildGeometryTables() {
+    int w = map.width;
+
+    // 1. 构建坐标映射 (Offset -> Axial)
+    // 适配 Odd-r (0,0 Bottom-Left)
+    for (int idx = 0; idx < mapSize; ++idx) {
+        int r = idx / w; // row
+        int c = idx % w; // col
+
+        coordR[idx] = r;
+        coordQ[idx] = c - (r - (r & 1)) / 2;
+    }
+
+    // 2. 构建邻居表 (基于 Axial 向量 DIR_DQ/DR)
+    // 这保证了 heuristic 和 neighbor 移动是几何上完全一致的
+    for (int idx = 0; idx < mapSize; ++idx) {
+        int q = coordQ[idx];
+        int r = coordR[idx];
+
+        for (int dir = 0; dir < 6; ++dir) {
+            int nq = q + DIR_DQ[dir];
+            int nr = r + DIR_DR[dir];
+
+            // Axial -> Odd-r Offset
+            int nc = nq + (nr - (nr & 1)) / 2;
+            int nr_offset = nr; // row is r
+
+            if (nc >= 0 && nc < lastWidth && nr_offset >= 0 && nr_offset < lastHeight) {
+                neighborIndex[idx * 6 + dir] = nr_offset * lastWidth + nc;
+            } else {
+                neighborIndex[idx * 6 + dir] = -1;
+            }
+        }
+    }
+}
+
+void JPS::clearAllNodeGens() {
+    // 彻底重置所有节点状态，通常只在 generation 溢出时调用
+    for (auto& n : nodeData) {
+        n.gScore = std::numeric_limits<int64_t>::max() / 2;
+        n.parentIdx = -1;
+        n.openGen = 0;
+        n.closeGen = 0;
+        n.arrivalDir = -1;
+    }
 }
 
 void JPS::reset() {
-    size_t requiredSize = (size_t)map.width * (size_t)map.height;
-    if (nodeData.size() != requiredSize) nodeData.resize(requiredSize);
-    std::fill(nodeData.begin(), nodeData.end(), Node());
-    currentGen = 0;
+    // 简单的重置只需增加代数
+    ++currentGen;
+    if (currentGen == 0) {
+        // 溢出处理
+        std::fill(jumpCacheGen.begin(), jumpCacheGen.end(), 0u);
+        clearAllNodeGens();
+        currentGen = 1;
+    }
+    openList.clear();
 }
 
-int JPS::getDirectionIndex(Hex from, Hex to) {
-    int dq = to.q - from.q;
-    int dr = to.r - from.r;
+// ============================================================================
+// JPS 核心逻辑
+// ============================================================================
 
-    if (dq == 0 && dr == 0) return -1;
-    if (dr == 0) return (dq > 0) ? 0 : 3;
-    if (dq == 0) return (dr > 0) ? 5 : 2;
-    if (dq + dr == 0) return (dq > 0) ? 1 : 4;
-    return -1; // 不在同一条射线上
-}
+bool JPS::hasForcedNeighborCardinal(int idx, int dirIdx) const {
+    // 检查方向 d 两侧的 "后方阻挡 + 前方可通"
+    // d+2 (左后), d+1 (左前)
+    // d-2 (右后), d-1 (右前)
 
-bool JPS::hasForcedNeighbors(const Hex& curr, int dirIdx) {
-    // 采用你最初推导的版本（对 axial 方向定义 HEX_DIRS 有效）：
-    // 若 dir+2（左后）被挡 且 dir+1（左前）可走 => 强制邻居存在
-    // 若 dir-2（右后）被挡 且 dir-1（右前）可走 => 强制邻居存在
-    int dLB = wrapDir(dirIdx + 2);
-    int dLF = wrapDir(dirIdx + 1);
-    int dRB = wrapDir(dirIdx - 2);
-    int dRF = wrapDir(dirIdx - 1);
+    int base = idx * 6;
 
-    Hex leftBack  = curr + HEX_DIRS[dLB];
-    Hex leftFore  = curr + HEX_DIRS[dLF];
-    Hex rightBack = curr + HEX_DIRS[dRB];
-    Hex rightFore = curr + HEX_DIRS[dRF];
+    // 优化：直接展开计算方向，减少 wrapDir 调用
+    // 假定 dirIdx 是 0,2,4 (Cardinal)
+    // 左侧: d+2, d+1
+    int dLeftBack = (dirIdx + 2) % 6;
+    int dLeftFore = (dirIdx + 1) % 6; // Cardinal+1 必为 Intercardinal，不需要wrap负数
 
-    if (!map.isWalkable(leftBack)  && map.isWalkable(leftFore))  return true;
-    if (!map.isWalkable(rightBack) && map.isWalkable(rightFore)) return true;
+    // 右侧: d-2, d-1.  (0-2)=-2 -> 4, (0-1)=-1 -> 5
+    int dRightBack = (dirIdx >= 2) ? (dirIdx - 2) : (dirIdx + 4);
+    int dRightFore = (dirIdx >= 1) ? (dirIdx - 1) : (dirIdx + 5);
+
+    int lbIdx = neighborIndex[base + dLeftBack];
+    bool lbBlocked = (lbIdx < 0) || !map.isWalkableIdx(lbIdx);
+
+    if (lbBlocked) {
+        int lfIdx = neighborIndex[base + dLeftFore];
+        if (lfIdx >= 0 && map.isWalkableIdx(lfIdx)) return true;
+    }
+
+    int rbIdx = neighborIndex[base + dRightBack];
+    bool rbBlocked = (rbIdx < 0) || !map.isWalkableIdx(rbIdx);
+
+    if (rbBlocked) {
+        int rfIdx = neighborIndex[base + dRightFore];
+        if (rfIdx >= 0 && map.isWalkableIdx(rfIdx)) return true;
+    }
+
     return false;
 }
 
-// JPS.cpp
+uint8_t JPS::getSuccessorDirsMask(int idx, int parentDir) const {
+    if (parentDir == -1) return 0x3F; // 起点：所有方向
 
-// 1. 修正 hasForcedNeighbors (逻辑没大问题，但可以稍微整理，保持原样即可)
-// ... (保留你的实现，它是正确的)
+    uint8_t mask = 0;
 
-Hex JPS::jump(const Hex& from, int dirIdx, const Hex& end) {
-    const Hex dirVec = HEX_DIRS[dirIdx];
+    if (isCardinal(parentDir)) {
+        // 1. 保持当前直线方向
+        mask |= (1u << parentDir);
 
-    // 第一步不可走：直接失败
-    Hex cur = from + dirVec;
-    if (!map.isWalkable(cur)) return INVALID_HEX;
+        // 2. 只有在有强制邻居时，才添加对应的转弯方向
+        // 强制邻居逻辑：
+        // 左后(d+2)堵 & 左前(d+1)通 -> 强制去 d+1
+        // 右后(d-2)堵 & 右前(d-1)通 -> 强制去 d-1
 
-    // 预计算目标的 S 坐标
-    int endS = -end.q - end.r;
+        int base = idx * 6;
 
-    // 预计算方向向量的 S 分量
-    int dirS = -dirVec.q - dirVec.r;
+        int dLeftBack = (parentDir + 2) % 6;
+        int lbIdx = neighborIndex[base + dLeftBack];
+        if (lbIdx < 0 || !map.isWalkableIdx(lbIdx)) {
+             int dLeftFore = (parentDir + 1) % 6;
+             int lfIdx = neighborIndex[base + dLeftFore];
+             if (lfIdx >= 0 && map.isWalkableIdx(lfIdx)) {
+                 mask |= (1u << dLeftFore);
+             }
+        }
+
+        int dRightBack = (parentDir >= 2) ? (parentDir - 2) : (parentDir + 4);
+        int rbIdx = neighborIndex[base + dRightBack];
+        if (rbIdx < 0 || !map.isWalkableIdx(rbIdx)) {
+            int dRightFore = (parentDir >= 1) ? (parentDir - 1) : (parentDir + 5);
+            int rfIdx = neighborIndex[base + dRightFore];
+            if (rfIdx >= 0 && map.isWalkableIdx(rfIdx)) {
+                mask |= (1u << dRightFore);
+            }
+        }
+
+    } else {
+        // Intercardinal (组合方向)
+        // 自然邻居：前进方向 + 两个分量方向 (d-1, d+1)
+        mask |= (1u << parentDir);
+        mask |= (1u << ((parentDir + 5) % 6)); // d-1
+        mask |= (1u << ((parentDir + 1) % 6)); // d+1
+    }
+
+    return mask;
+}
+
+// ============================================================================
+// 跳跃逻辑
+// ============================================================================
+
+int JPS::jumpCardinal(int fromIdx, int dirIdx, int endIdx) {
+    size_t key = static_cast<size_t>(fromIdx) * 6 + dirIdx;
+
+    if (jumpCacheGen[key] == currentGen) {
+        return jumpCacheResult[key];
+    }
+
+    int cur = getWalkableNeighbor(fromIdx, dirIdx);
+    // 缓存 -1 结果
+    if (cur == -1) {
+        jumpCacheGen[key] = currentGen;
+        jumpCacheResult[key] = -1;
+        return -1;
+    }
 
     while (true) {
-        // 1. 到达目标
-        if (cur == end) return cur;
-
-        // 2. 发现强制邻居 (Forced Neighbor) -> 是跳点
-        if (hasForcedNeighbors(cur, dirIdx)) return cur;
-
-        // 3. 几何对齐优化 (保留这个，这是速度的关键)
-        // 在空地上，一旦坐标轴与目标对齐，就停下来，防止冲过头
-        int curS = -cur.q - cur.r;
-        if (dirVec.q != 0 && cur.q == end.q) return cur;
-        if (dirVec.r != 0 && cur.r == end.r) return cur;
-        if (dirS != 0 && curS == endS) return cur;
-
-        // 4. 撞墙预判 (关键修正！)
-        Hex next = cur + dirVec;
-        if (!map.isWalkable(next)) {
-            // 【修正】：之前让你返回 INVALID_HEX，导致进山进不去。
-            // 现在改为：如果下一步撞墙，就把当前点(cur)作为跳点返回。
-            // 这样算法会在墙边停下，并在下一轮扩展中尝试转向(依靠 Natural Neighbors)。
+        if (cur == endIdx) {
+            jumpCacheGen[key] = currentGen;
+            jumpCacheResult[key] = cur;
             return cur;
         }
 
-        // 继续跳跃
+        // 检查强制邻居
+        if (hasForcedNeighborCardinal(cur, dirIdx)) {
+            jumpCacheGen[key] = currentGen;
+            jumpCacheResult[key] = cur;
+            return cur;
+        }
+
+        int next = getWalkableNeighbor(cur, dirIdx);
+        if (next == -1) {
+            jumpCacheGen[key] = currentGen;
+            jumpCacheResult[key] = -1;
+            return -1;
+        }
         cur = next;
     }
 }
 
-std::vector<Hex> JPS::findPath(Hex start, Hex end) {
-    // reset() 已经处理了内存大小检查和初始化
-    // 这里只需要处理代计数溢出
+int JPS::jumpIntercardinal(int fromIdx, int dirIdx, int endIdx) {
+    size_t key = static_cast<size_t>(fromIdx) * 6 + dirIdx;
 
-    if (!map.isWalkable(start) || !map.isWalkable(end)) return {};
-    if (start == end) return { start };
-
-    currentGen++;
-    if (currentGen == 0) { // 溢出保护
-        std::fill(nodeData.begin(), nodeData.end(), Node());
-        currentGen = 1;
+    if (jumpCacheGen[key] == currentGen) {
+        return jumpCacheResult[key];
     }
 
-    const int startIdx = map.getIndex(start);
-    const int endIdx   = map.getIndex(end);
-    if (startIdx < 0 || endIdx < 0) return {};
+    int cur = getWalkableNeighbor(fromIdx, dirIdx);
+    if (cur == -1) {
+        jumpCacheGen[key] = currentGen;
+        jumpCacheResult[key] = -1;
+        return -1;
+    }
 
-    auto initNodeIfNewGen = [&](int idx) {
-        if (nodeData[idx].visitedGen != currentGen) {
-            nodeData[idx].visitedGen = currentGen;
-            nodeData[idx].closedGen  = 0;
-            nodeData[idx].gScore     = 4000000000000000000LL;
-            nodeData[idx].parentIdx  = -1;
+    // 分解为两个 Cardinal 分量
+    int d1 = (dirIdx + 5) % 6; // dir - 1
+    int d2 = (dirIdx + 1) % 6; // dir + 1
+
+    while (true) {
+        if (cur == endIdx) {
+            jumpCacheGen[key] = currentGen;
+            jumpCacheResult[key] = cur;
+            return cur;
         }
-    };
 
-    initNodeIfNewGen(startIdx);
-    nodeData[startIdx].gScore    = 0;
-    nodeData[startIdx].parentIdx = -1;
+        // 如果任一分量方向能产生跳点，则当前点也是跳点
+        // 注意：这里递归调用 jumpCardinal，它会利用缓存，不会太慢
+        if (jumpCardinal(cur, d1, endIdx) != -1) {
+            jumpCacheGen[key] = currentGen;
+            jumpCacheResult[key] = cur;
+            return cur;
+        }
+        if (jumpCardinal(cur, d2, endIdx) != -1) {
+            jumpCacheGen[key] = currentGen;
+            jumpCacheResult[key] = cur;
+            return cur;
+        }
 
-    struct PQItem {
-        int64_t f;
-        int64_t g;
-        int idx;
-        bool operator>(const PQItem& o) const { return f > o.f; }
-    };
+        int next = getWalkableNeighbor(cur, dirIdx);
+        if (next == -1) {
+            jumpCacheGen[key] = currentGen;
+            jumpCacheResult[key] = -1;
+            return -1;
+        }
+        cur = next;
+    }
+}
 
-    std::priority_queue<PQItem, std::vector<PQItem>, std::greater<PQItem>> openSet;
-    openSet.push({ (int64_t)start.distance(end) * 1000, 0, startIdx });
+int JPS::jumpIdx(int fromIdx, int dirIdx, int endIdx) {
+    if (isCardinal(dirIdx)) {
+        return jumpCardinal(fromIdx, dirIdx, endIdx);
+    } else {
+        return jumpIntercardinal(fromIdx, dirIdx, endIdx);
+    }
+}
 
-    while (!openSet.empty()) {
-        PQItem it = openSet.top();
-        openSet.pop();
+// ============================================================================
+// 主寻路函数
+// ============================================================================
 
-        int currIdx = it.idx;
+std::vector<Hex> JPS::findPath(Hex start, Hex end) {
+    ensureCapacity();
 
-        if (nodeData[currIdx].visitedGen != currentGen) continue;
-        if (it.g != nodeData[currIdx].gScore) continue;          // stale
-        if (nodeData[currIdx].closedGen == currentGen) continue; // closed
+    int startIdx = map.getIndex(start);
+    int endIdx = map.getIndex(end);
 
-        Hex curr = map.getHex(currIdx);
+    if (startIdx < 0 || endIdx < 0 || startIdx >= mapSize || endIdx >= mapSize) return {};
+    if (!map.isWalkableIdx(startIdx) || !map.isWalkableIdx(endIdx)) return {};
+    if (startIdx == endIdx) return { start };
 
-        nodeData[currIdx].closedGen = currentGen;
+    // Reset Gen
+    ++currentGen;
+    if (currentGen == 0) {
+        std::fill(jumpCacheGen.begin(), jumpCacheGen.end(), 0u);
+        clearAllNodeGens();
+        currentGen = 1;
+    }
+    openList.clear();
 
-        VIZ_LOG(curr);
+    // Init Start Node
+    Node& startNode = nodeData[startIdx];
+    startNode.gScore = 0;
+    startNode.parentIdx = -1;
+    startNode.openGen = currentGen;
+    startNode.closeGen = 0;
+    startNode.arrivalDir = -1; // 起点没有来源方向
+
+    // Push Start
+    openList.push_back({ hexDistIdx(startIdx, endIdx), 0, startIdx });
+    std::push_heap(openList.begin(), openList.end(), std::greater<PQItem>());
+
+    while (!openList.empty()) {
+        // Pop best
+        std::pop_heap(openList.begin(), openList.end(), std::greater<PQItem>());
+        PQItem item = openList.back();
+        openList.pop_back();
+
+        int currIdx = item.idx;
+
+        // Lazy cleanup check
+        if (nodeData[currIdx].openGen != currentGen) continue;
+        if (nodeData[currIdx].closeGen == currentGen) continue;
+        if (item.g > nodeData[currIdx].gScore) continue;
+
+        nodeData[currIdx].closeGen = currentGen;
+
+        // Viz / Debug
+        VIZ_LOG(map.getHex(currIdx));
 
         if (currIdx == endIdx) {
-            // 重建 jump 点链
-            std::vector<Hex> jumps;
-            for (int c = currIdx; c != -1; c = nodeData[c].parentIdx) {
-                jumps.push_back(map.getHex(c));
-            }
-            std::reverse(jumps.begin(), jumps.end());
-
-            // 填充每段射线
-            std::vector<Hex> path;
-            if (!jumps.empty()) path.push_back(jumps[0]);
-
-            for (size_t i = 0; i + 1 < jumps.size(); ++i) {
-                Hex p1 = jumps[i];
-                Hex p2 = jumps[i + 1];
-                int dist = p1.distance(p2);
-                if (dist <= 0) continue;
-
-                int dir = getDirectionIndex(p1, p2);
-                if (dir == -1) {
-                    // 正常不应发生（jump 只产生射线段）。保底：直接返回 jumps
-                    return jumps;
-                }
-
-                for (int k = 0; k < dist; ++k) {
-                    p1 = p1 + HEX_DIRS[dir];
-                    path.push_back(p1);
-                }
-            }
-            return path;
+            return reconstructPath(endIdx);
         }
 
-        // 生成 successor 方向（bitmask 去重）
-        uint8_t dirMask = 0;
-        auto addDir = [&](int d) { dirMask |= (uint8_t)(1u << wrapDir(d)); };
+        // 优化点：直接使用缓存的 arrivalDir，无需计算 getDirectionIndex
+        int parentDir = nodeData[currIdx].arrivalDir;
 
-        int pIdx = nodeData[currIdx].parentIdx;
-        if (pIdx == -1) {
-            dirMask = 0x3F; // 起点：6 个方向
-        } else {
-            Hex parent = map.getHex(pIdx);
-            int inDir = getDirectionIndex(parent, curr);
-            if (inDir == -1) {
-                dirMask = 0x3F;
-            } else {
-                // Hex 的“前进锥”：直行 + 左右 60°（保证空地可转向）
-                addDir(inDir);
-                addDir(inDir + 1);
-                addDir(inDir - 1);
-            }
-        }
+        // 计算后继方向
+        uint8_t mask = getSuccessorDirsMask(currIdx, parentDir);
 
-        // 执行跳跃扩展
         for (int dir = 0; dir < 6; ++dir) {
-            if (!(dirMask & (1u << dir))) continue;
+            if (!(mask & (1u << dir))) continue;
 
-            // 如果第一步就不可走，跳过
-            Hex n1 = curr + HEX_DIRS[dir];
-            if (!map.isWalkable(n1)) continue;
+            // 第一步检查：如果立刻受阻，无需跳跃
+            if (getWalkableNeighbor(currIdx, dir) == -1) continue;
 
-            Hex jp = jump(curr, dir, end);
-            if (jp == INVALID_HEX) continue;
+            int jpIdx = jumpIdx(currIdx, dir, endIdx);
 
-            int jpIdx = map.getIndex(jp);
-            if (jpIdx < 0) continue;
+            if (jpIdx != -1) {
+                // 发现跳点
+                Node& jpNode = nodeData[jpIdx];
 
-            initNodeIfNewGen(jpIdx);
+                // 懒初始化
+                if (jpNode.openGen != currentGen) {
+                    jpNode.openGen = currentGen;
+                    jpNode.closeGen = 0;
+                    jpNode.gScore = std::numeric_limits<int64_t>::max() / 2;
+                    jpNode.parentIdx = -1;
+                }
 
-            int64_t newG = nodeData[currIdx].gScore + (int64_t)curr.distance(jp) * 1000;
-            if (newG < nodeData[jpIdx].gScore) {
-                nodeData[jpIdx].gScore    = newG;
-                nodeData[jpIdx].parentIdx = currIdx;
+                if (jpNode.closeGen == currentGen) continue;
 
-                int64_t h = (int64_t)jp.distance(end) * 1000;
-                openSet.push({ newG + h, newG, jpIdx });
+                int64_t newG = nodeData[currIdx].gScore + hexDistIdx(currIdx, jpIdx);
+
+                if (newG < jpNode.gScore) {
+                    jpNode.gScore = newG;
+                    jpNode.parentIdx = currIdx;
+                    jpNode.arrivalDir = dir; // 记录到达方向！关键优化！
+
+                    int64_t h = hexDistIdx(jpIdx, endIdx);
+                    openList.push_back({ newG + h, newG, jpIdx });
+                    std::push_heap(openList.begin(), openList.end(), std::greater<PQItem>());
+                }
             }
         }
     }
 
     return {};
+}
+
+// ============================================================================
+// 辅助函数
+// ============================================================================
+
+int JPS::getDirectionIndex(int fromIdx, int toIdx) const {
+    // 仅在 reconstructPath 中使用，无需极致优化
+    if (fromIdx == toIdx) return -1;
+
+    int dq = coordQ[toIdx] - coordQ[fromIdx];
+    int dr = coordR[toIdx] - coordR[fromIdx];
+    int ds = -dq - dr;
+
+    // 计算距离
+    int dist = (std::abs(dq) + std::abs(dr) + std::abs(ds)) >> 1;
+    if (dist == 0) return -1;
+
+    int ndq = dq / dist;
+    int ndr = dr / dist;
+
+    for(int i=0; i<6; ++i) {
+        if(DIR_DQ[i] == ndq && DIR_DR[i] == ndr) return i;
+    }
+    return -1;
+}
+
+std::vector<Hex> JPS::reconstructPath(int endIdx) const {
+    std::vector<int> pathIndices;
+    int curr = endIdx;
+
+    while (curr != -1) {
+        pathIndices.push_back(curr);
+        curr = nodeData[curr].parentIdx;
+    }
+
+    if (pathIndices.empty()) return {};
+    std::reverse(pathIndices.begin(), pathIndices.end());
+
+    std::vector<Hex> fullPath;
+    // 预估大小
+    fullPath.reserve(pathIndices.size() * 5);
+
+    fullPath.push_back(map.getHex(pathIndices[0]));
+
+    for (size_t i = 0; i < pathIndices.size() - 1; ++i) {
+        int from = pathIndices[i];
+        int to = pathIndices[i+1];
+
+        int dir = getDirectionIndex(from, to);
+
+        // 填充中间点
+        if (dir != -1) {
+            int step = neighborIndex[from * 6 + dir];
+            while (step != -1 && step != to) {
+                fullPath.push_back(map.getHex(step));
+                step = neighborIndex[step * 6 + dir];
+            }
+        }
+        fullPath.push_back(map.getHex(to));
+    }
+
+    return fullPath;
 }

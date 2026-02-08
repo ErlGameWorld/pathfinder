@@ -23,6 +23,7 @@
 #include "finder/DHPAJps.h"
 #include "finder/HJPS.h"
 
+
 #ifdef VIZ_SUPPORT
     std::vector<Hex> g_vizVisitedLog;
     bool g_vizEnabled = false;
