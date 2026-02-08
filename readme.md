@@ -166,4 +166,3 @@ C++ 后端通过标准输入输出 (Stdio) 与 Node.js 服务器通信。支持�
 | **其他** | Obstacle | 障碍物 | 其他未定义 ID 默认视为通用障碍物 |
 
 ---
-*Created by Trae AI Assistant*
