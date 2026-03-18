@@ -22,8 +22,8 @@ public:
 private:
     HexMap& map;
 
-    // ==================== ¼¸ºÎ³£Á¿ ====================
-    // Axial ÏòÁ¿¶¨Òå (ÅäºÏ Odd-r Y-Up)
+    // ==================== å‡ ä½•å¸¸é‡ ====================
+    // Axial å‘é‡å®šä¹‰ (é…åˆ Odd-r Y-Up)
     // 0: E  (+1, 0) -> Cardinal
     // 1: SE (+1, -1)-> Intercardinal (Sum of 0 & 2)
     // 2: SW ( 0, -1)-> Cardinal
@@ -41,7 +41,7 @@ private:
     int lastHeight = 0;
     int mapSize = 0;
 
-    // ==================== ½ÚµãÊı¾İ ====================
+    // ==================== èŠ‚ç‚¹æ•°æ® ====================
     struct Node {
         int64_t  gScore    = std::numeric_limits<int64_t>::max() / 2;
         int      parentIdx = -1;
@@ -61,17 +61,17 @@ private:
     };
     std::vector<PQItem> openList;
 
-    // ==================== »º´æ ====================
+    // ==================== ç¼“å­˜ ====================
     std::vector<uint32_t> jumpCacheGen;
     std::vector<int>      jumpCacheResult;
     uint32_t currentGen = 1;
 
-    // ==================== ºËĞÄº¯Êı ====================
+    // ==================== æ ¸å¿ƒå‡½æ•° ====================
     void ensureCapacity();
     void rebuildGeometryTables();
     void clearAllNodeGens();
 
-    // Å¼Êı·½Ïò(0,2,4)ÎªÖáÏò(Cardinal)£¬ÆæÊı·½Ïò(1,3,5)Îª×éºÏÏò(Intercardinal)
+    // å¶æ•°æ–¹å‘(0,2,4)ä¸ºè½´å‘(Cardinal)ï¼Œå¥‡æ•°æ–¹å‘(1,3,5)ä¸ºç»„åˆå‘(Intercardinal)
     static inline bool isCardinal(int dir) { return (dir & 1) == 0; }
 
     inline int getNeighbor(int idx, int dir) const {

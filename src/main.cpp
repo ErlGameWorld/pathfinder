@@ -219,7 +219,8 @@ void runInteractive(HexMap& map) {
             generator.applyToMap(map);
             
             // Rebuild Graphs
-            // for(auto& kv : g_finders) kv.second->buildGraph();
+            std::cout << "[Interactive] Rebuilding graphs..." << std::endl;
+            for(auto& kv : g_finders) kv.second->buildGraph();
             
             std::cout << "MAP_DATA " << generator.serializeRLE() << std::endl;
             
@@ -247,7 +248,8 @@ void runInteractive(HexMap& map) {
                         }
                     }
                     
-                    //for(auto& kv : g_finders) kv.second->buildGraph();
+                    std::cout << "[Interactive] Rebuilding graphs..." << std::endl;
+                    for(auto& kv : g_finders) kv.second->buildGraph();
                     std::cout << "OK" << std::endl;
                 }
             }
@@ -309,9 +311,25 @@ void runInteractive(HexMap& map) {
             
             map.setObstacleOffset(c, r, state != 0);
             Hex h = offsetToAxial(c, r);
-            //for(auto& kv : g_finders) kv.second->onMapUpdate({h});
+            for(auto& kv : g_finders) kv.second->onMapUpdate({h});
             
             std::cout << "OK" << std::endl;
+        } else if (cmd == 'C') {
+            int removed = 0;
+            for (auto& v : map.grid) {
+                if (v) {
+                    v = 0;
+                    removed++;
+                }
+            }
+            
+            // 重置 finder 缓存
+            for(auto& kv : g_finders) {
+                kv.second->reset();
+                kv.second->buildGraph();
+            }
+            
+            std::cout << "CLEANED " << removed << std::endl;
         } else if (cmd == 'Q') {
             break;
         }
@@ -347,7 +365,10 @@ int main(int argc, char** argv) {
     }
 
     // Build initial graphs
-    // for(auto& kv : g_finders) kv.second->buildGraph();
+    std::cout << "[Main] Building hierarchical graphs..." << std::endl;
+    for(auto& kv : g_finders) {
+        kv.second->buildGraph();
+    }
 
     if (interactive) {
         std::cerr << "Server Ready" << std::endl; 

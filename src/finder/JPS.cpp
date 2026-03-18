@@ -86,15 +86,16 @@ void JPS::clearAllNodeGens() {
 }
 
 void JPS::reset() {
-    // 简单的重置只需增加代数
+    // Increment generation to invalidate cache lazily
     ++currentGen;
     if (currentGen == 0) {
-        // 溢出处理
+        // Handle overflow
         std::fill(jumpCacheGen.begin(), jumpCacheGen.end(), 0u);
         clearAllNodeGens();
         currentGen = 1;
     }
-    openList.clear();
+    // No need to clear openList here as it is local to findPath or cleared there
+    // No need to rebuild neighborIndex as it is purely geometric
 }
 
 // ============================================================================

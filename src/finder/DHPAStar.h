@@ -30,6 +30,7 @@ public:
 private:
     void addEdge(Hex u, Hex v, int cost, bool isTemporary);
     void refreshCluster(int cId);
+    void rebuildCluster(int cId); // Full rebuild of cluster portals and edges
     void connectToGraph(Hex node);
     void cleanupDirtyNodes();
 };
